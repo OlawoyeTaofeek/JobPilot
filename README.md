@@ -82,7 +82,7 @@ JobPilot is my answer. It is a **real system on real data**, not a demo on fake 
 
 ## Architecture
 
-![JobPilot architecture](docs/architecture.png)
+![JobPilot architecture](docs\image.png)
 
 > The diagram is editable: open [`docs/architecture.excalidraw`](docs/architecture.excalidraw) at [excalidraw.com](https://excalidraw.com) (*Open* → choose the file). Green = built, yellow = in progress, grey dashed = planned.
 
