@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     openai_tracing: bool = True
 
+    # tracing: Langfuse (optional; skipped if empty)   <- NEW
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+
     database_url: str = "postgresql+asyncpg://jobagent:jobagent@localhost:5432/jobagent"
 
     jsearch_api_key: str = ""
