@@ -12,3 +12,5 @@ Rules:
 - Any tool that sends, posts or deletes uses `needs_approval`.
 - user_id always comes from `AppCtx` (server-side), never from a tool argument.
 - Paused runs (RunState) are stored server-side only.
+
+![Architecture](image.png)
