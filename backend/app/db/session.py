@@ -10,7 +10,7 @@ engine = create_async_engine(
     pool_size=10,
     max_overflow=10,
     pool_recycle=1800,
-    echo=get_settings().app_env == "dev"
+    echo=get_settings().app_env != "dev"
 )
 AsyncSessionLocal = async_sessionmaker(
     engine, expire_on_commit=False,

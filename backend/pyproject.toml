@@ -22,6 +22,8 @@ dependencies = [
     "python-multipart>=0.0.32",
     "pwdlib[argon2]>=0.3.1",
     "pydantic[email]>=2.14.1",
+    "langfuse>=5.0.4",
+    "openinference-instrumentation-openai-agents>=2.6.0",
 ]
 
 [project.optional-dependencies]
