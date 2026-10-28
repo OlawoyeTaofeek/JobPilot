@@ -1,0 +1,49 @@
+name: job-agent
+
+services:
+  db:
+    image: pgvector/pgvector:pg16        # Postgres + pgvector for RAG
+    environment:
+      POSTGRES_USER: jobagent
+      POSTGRES_PASSWORD: jobagent
+      POSTGRES_DB: jobagent
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobagent"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    build: { context: ../backend, dockerfile: ../infra/Dockerfile.backend }
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://jobagent:jobagent@db:5432/jobagent
+    ports: ["8000:8000"]
+    depends_on: { db: { condition: service_healthy } }
+
+  worker:                                 # daily collector, follow-ups
+    build: { context: ../backend, dockerfile: ../infra/Dockerfile.backend }
+    command: python -m app.workers.scheduler
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://jobagent:jobagent@db:5432/jobagent
+    depends_on: { db: { condition: service_healthy } }
+
+  frontend:
+    build: { context: ../frontend, dockerfile: ../infra/Dockerfile.frontend }
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ["3000:3000"]
+    depends_on: [backend]
+
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports: ["5050:80"]
+    profiles: ["tools"]                   # start with: --profile tools
+
+volumes:
+  pgdata:

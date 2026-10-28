@@ -1,0 +1,45 @@
+{
+  "job_id": "QXA4OHBrcmlJR2JwMU9sX0FBQUFBQT09OkVzd0JDb3dCUVVwcFZEUjBUR0UyYlVsWllrTmtOVVZ4V1RCdWFrcE9VM2xTY25aWFNHTlRkbUUxUnkxNFpGTnBUR3RxUlRsWmJrVlJVbVZUVDB0eldITmFWbWhJTW5sVVdFODVaakl6U1VONmFFNDRYMU42VFZkZmJYUjRiVWxaYkdwM1prbFVOV3hVYW1wMFNrVk1WblJyYmprMVdGQkVTQzAxWkVsRVVHWlZOVlZMVDFSaGRrNTVka1ZsVlRSUU5uY1NGelZuWW1aaGNIcEVRMGwxU25CMFVWQjNYM0Z2YlZGRkdpSkJSSE55T1daU1pFaFZTRWREZFhGUGJqaFlja2RwT1daWmRHRjNPR2xTTnpkMw",
+  "job_title": "AI/ML Infrastructure Engineer",
+  "employer_name": "Placements24",
+  "employer_logo": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://placements24.com&size=128",
+  "employer_website": "https://www.placements24.com",
+  "job_publisher": "WhatJobs",
+  "job_employment_type": "Full-time",
+  "job_employment_types": [
+    "FULLTIME"
+  ],
+  "job_apply_link": "https://en-ng.whatjobs.com/jobs/ai-ml-infrastructure-engineer/enugu?id=7790565",
+  "job_apply_is_direct": false,
+  "apply_options": [
+    {
+      "apply_link": "https://en-ng.whatjobs.com/jobs/ai-ml-infrastructure-engineer/enugu?id=7790565",
+      "is_direct": false,
+      "publisher": "WhatJobs"
+    }
+  ],
+  "job_description": "About the Role\n\nOur client is looking for a skilled AI/ML Infrastructure Engineer to join their cutting-edge technology team in Enugu . This role is crucial for building and maintaining the robust, scalable, and efficient infrastructure required to support the company's advanced AI and machine learning initiatives. You will be responsible for designing, implementing, and optimizing the hardware and software systems that enable large-scale model training, deployment, and monitoring. This is an exciting opportunity to work at the intersection of AI and infrastructure, playing a key role in enabling groundbreaking AI research and product development. You will be working with state-of-the-art technologies to ensure seamless operation of our AI platforms.\nKey Responsibilities Design, build, and maintain scalable and reliable infrastructure for AI/ML workloads, including compute clusters, storage systems, and networking. Implement and manage MLOps pipelines for model training, deployment, versioning, and monitoring. Optimize infrastructure for performance, cost, and efficiency to support large-scale machine learning model training and inference. Work with cloud platforms (AWS, Azure, GCP) and on-premise solutions to deploy and manage AI/ML infrastructure. Develop automation scripts and tools for infrastructure provisioning, configuration management, and deployment. Collaborate with AI/ML researchers and engineers to understand their infrastructure needs and provide solutions. Monitor system performance, identify bottlenecks, and implement solutions to ensure high availability and reliability. Ensure the security of the AI/ML infrastructure and data. Stay up-to-date with the latest trends and technologies in AI/ML infrastructure, DevOps, and cloud computing. Troubleshoot and resolve complex infrastructure-related issues. Requirements Bachelor's degree in Computer Science, Engineering, or a related technical field. Proven experience (4+ years) as an Infrastructure Engineer, DevOps Engineer, or Site Reliability Engineer (SRE), with a focus on AI/ML systems. Strong understanding of AI/ML concepts, workflows, and common libraries (e.g., TensorFlow, PyTorch, scikit-learn). Hands-on experience with cloud computing platforms (AWS, Azure, GCP) and their services for ML. Proficiency in scripting languages such as Python, Bash, or PowerShell. Experience with containerization technologies (Docker, Kubernetes) and orchestration tools. Familiarity with CI/CD tools and best practices. Knowledge of networking, storage, and compute hardware relevant to high-performance computing. Experience with monitoring and logging tools (e.g., Prometheus, Grafana, ELK stack). Strong problem-solving skills and the ability to work independently and as part of a team. Benefits\n\nOur client offers a competitive salary, comprehensive health benefits, and a retirement savings plan. We provide generous paid time off and foster a culture that prioritizes work-life balance. Employees have access to continuous learning opportunities, including training programs, workshops, and conference attendance. This role is based at our modern facility in Enugu , offering a collaborative and dynamic work environment. Join a forward-thinking company that is at the forefront of AI innovation and offers the chance to work on challenging and impactful projects. We are committed to employee growth and development.",
+  "job_is_remote": false,
+  "job_posted_at": "5 days ago",
+  "job_posted_at_timestamp": 1792540800,
+  "job_posted_at_datetime_utc": "2026-10-21T00:00:00.000Z",
+  "job_location": "Enugu",
+  "job_city": "Enugu",
+  "job_state": "Enugu",
+  "job_country": "NG",
+  "job_latitude": 6.448270099999999,
+  "job_longitude": 7.5138947,
+  "job_benefits": null,
+  "job_benefits_strings": null,
+  "job_google_link": "https://www.google.com/search?q=jobs&gl=ng&hl=en&udm=8#vhid=vt%3D20/docid%3DAp88pkriIGbp1Ol_AAAAAA%3D%3D&vssid=jobs-detail-viewer",
+  "job_salary": null,
+  "job_salary_string": null,
+  "job_min_salary": null,
+  "job_max_salary": null,
+  "job_salary_period": null,
+  "job_highlights": {},
+  "job_onet_soc": null,
+  "job_onet_job_zone": null,
+  "employer_reviews": null,
+  "job_uid": "Ap88pkriIGbp1Ol_AAAAAA=="
+}

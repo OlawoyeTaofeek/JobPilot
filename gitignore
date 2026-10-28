@@ -1,0 +1,46 @@
+# --- secrets (never commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+
+# --- local data, logs, dumps ---
+data/
+logs/
+*.log
+*.db
+*.sqlite
+*.dump
+pgdata/
+uploads/
+*.zip
+
+# --- old dev UIs ---
+.chainlit/
+.files/
+
+# --- editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

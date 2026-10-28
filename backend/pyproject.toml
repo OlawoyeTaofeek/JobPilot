@@ -1,0 +1,36 @@
+[project]
+name = "job-agent-backend"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "openai-agents>=0.24",
+    "openai",
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic-settings",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg",
+    "alembic",
+    "pgvector",
+    "httpx",
+    "sse-starlette",
+    "cryptography",
+    "pyjwt",
+    "apscheduler",
+    "pypdf",
+    "python-docx",
+    "python-multipart>=0.0.32",
+    "pwdlib[argon2]>=0.3.1",
+    "pydantic[email]>=2.14.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "ruff", "chainlit", "pyyaml"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = ["integration: needs a running Postgres test database"]
+pythonpath = ["."]

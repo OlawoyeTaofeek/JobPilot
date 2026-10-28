@@ -1,0 +1,15 @@
+# fly launch will refine this. One app per service (backend, worker).
+app = "job-agent-backend"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "../Dockerfile.backend"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+
+[checks.health]
+  type = "http"
+  path = "/health"
+  interval = "30s"

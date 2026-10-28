@@ -1,0 +1,11 @@
+# Prompt regression cases: run with `make evals` after every prompt/tool change.
+- id: search_basic
+  input: "Find remote ML engineer roles"
+  expect_tools: [search_jobs]
+- id: off_topic
+  input: "Write me a poem about cats"
+  expect_guardrail: input_scope
+- id: draft_needs_approval
+  input: "Draft an application for the first saved job"
+  expect_tools: [search_my_profile, draft_application]
+  expect_approval: draft_application
