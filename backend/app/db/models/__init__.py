@@ -6,7 +6,9 @@ from app.db.models.posting import Posting
 from app.db.models.posting_skill import PostingSkill
 from app.db.models.user import OAuthCredential, User
 
-__all__ = ["CollectorRun", "OAuthCredential", "Posting", "PostingSkill", "User"]
+__all__ = [
+    "CollectorRun", "OAuthCredential", "Posting", "PostingSkill", "User"
+]
 
 # Add as you build them, e.g.:
 # from app.db.models.posting import Posting

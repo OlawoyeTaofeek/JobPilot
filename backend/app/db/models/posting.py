@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 from decimal import Decimal
-# from .posting_skill import PostingSkill
+from .posting_skill import PostingSkill
 
 class Posting(TimestampMixin, Base):
     __tablename__ = "postings"

@@ -4,7 +4,7 @@ from sqlalchemy import BigInteger, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-# from .posting import Posting
+from .posting import Posting
 
 
 class PostingSkill(Base):
