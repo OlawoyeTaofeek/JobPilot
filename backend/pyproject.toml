@@ -3,7 +3,7 @@ name = "job-agent-backend"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "openai-agents>=0.24",
+    "openai-agents[litellm]>=0.24",
     "openai",
     "fastapi",
     "uvicorn[standard]",
@@ -24,6 +24,8 @@ dependencies = [
     "pydantic[email]>=2.14.1",
     "langfuse>=5.0.4",
     "openinference-instrumentation-openai-agents>=2.6.0",
+    "tavily>=1.1.0",
+    "tavily-python>=0.8.5",
 ]
 
 [project.optional-dependencies]

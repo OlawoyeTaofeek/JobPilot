@@ -103,13 +103,17 @@ async def test_quota_error_stops_the_source(db, session_factory, jobs):
     assert failed.quota_remaining == 8
 
 
-async def test_auth_error_stops_everything(db, session_factory, jobs):
-    first = ScriptedSource([JSearchAuthError("Rejected", status_code=403)])
-    second = ScriptedSource([jobs])
+async def test_auth_error_stops_only_that_source(db, session_factory, jobs, caplog):
+    """A bad key stops ITS source; other sources have their own keys and keep going."""
+    first = ScriptedSource([JSearchAuthError("Rejected", status_code=403), jobs])
+    second = ScriptedSource([jobs, []])
     second.name = "other"
-    totals = await run([first, second], [LONDON], max_requests_per_day={}, session_factory=session_factory)
-    assert second.calls == 0                                # the whole run stopped
+    totals = await run([first, second], [LONDON, LAGOS], max_requests_per_day={},
+                       session_factory=session_factory)
+    assert first.calls == 1                                 # no second request with a bad key
+    assert second.calls == 2                                # the other source still ran
     assert "Rejected" in totals.errors[0]
+    assert totals.inserted == 3
 
 
 async def test_daily_budget_stops_before_spending(db, session_factory, jobs):

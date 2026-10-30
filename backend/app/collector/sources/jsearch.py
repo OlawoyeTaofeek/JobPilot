@@ -5,7 +5,9 @@ import logging
 from dataclasses import dataclass
 from app.collector.normalize import PostingIn, normalize_jsearch
 from .base import FetchResult, PlanItem
-
+from app.collector.sources.base import (
+    FetchResult, PlanItem, SourceAuthError, SourceError, SourceQuotaError,
+)
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -20,7 +22,7 @@ QUOTA_SAFETY_MARGIN = 10
 MAX_ATTEMPTS = 3
 
 
-class JSearchError(Exception):
+class JSearchError(SourceError):
     """
     Base class for every JSearch failure. Carries context for logging.
     A failure the caller must handle (bad key, quota, unexpected response).
@@ -53,11 +55,11 @@ class JSearchError(Exception):
         return " | ".join(parts)
 
 
-class JSearchAuthError(JSearchError):
+class JSearchAuthError(JSearchError, SourceAuthError):
     """401/403: bad key or not subscribed. Stop everything; fix .env."""
 
 
-class JSearchQuotaError(JSearchError):
+class JSearchQuotaError(JSearchError, SourceQuotaError):
     """Quota exhausted (429 after retries) or below the safety margin. Stop for today."""
 
     def __init__(
@@ -246,10 +248,6 @@ def _read_quota(response: httpx.Response) -> int | None:
         return int(value) if value is not None else None
     except ValueError:
         return None
-
-
-# ---- adapter to the shared Source interface --------------------------------------
-
 
 class JSearchSource:
     """Wraps JSearchClient so run_daily can treat it like any other Source."""

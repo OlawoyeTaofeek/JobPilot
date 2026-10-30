@@ -1,12 +1,68 @@
-"""Daily collector: fetch -> normalize -> fingerprint -> upsert -> log.
+"""Daily collector: run every job source through one pipeline and log everything.
 
-Run from backend/:
-    uv run python -m app.collector.run_daily              # normal run
-    uv run python -m app.collector.run_daily --dry-run    # fetch + normalize, save nothing
-    uv run python -m app.collector.run_daily --limit 1    # only the first planned search
+Purpose
+-------
+This is stage 1 of the daily pipeline ("collect"). It decides which searches to run today,
+runs each one through every configured source, and stores new postings:
 
-Every fetch attempt (success or failure) gets one row in collector_runs.
-Safe to run twice: postings already stored are skipped by upsert_many.
+    run_daily (collect)  ->  extract_pending (understand)  ->  digest / agent / analytics
+
+For every source and every planned search:
+
+    fetch -> normalize -> fingerprint -> upsert_many -> log_run (collector_runs)
+
+Sources
+-------
+Built in `build_sources()` from the keys in Settings. A source whose key is missing is
+skipped with a warning, so the collector still runs with whatever is configured:
+
+    name          class / factory              sites                               key
+    jsearch       JSearchSource                aggregator (Indeed, LinkedIn, ...)  JSEARCH_API_KEY
+    ats           tavily_search.ats_source     Greenhouse, Lever, Ashby, Workable  TAVILY_API_KEY
+    job_boards    tavily_search.boards_source  LinkedIn, Indeed, Glassdoor (links) TAVILY_API_KEY
+
+Every source follows the `Source` protocol in `sources/base.py`, so `run()` never needs to
+know which one it is talking to (design decision D18).
+
+The plan
+--------
+`SEARCHES` lists every search we care about. `todays_plan()` takes a rotating slice of it
+each day, so a small daily budget still covers every market across the week. The slice is
+as long as the largest per-source budget; each source then stops at its own budget.
+
+Budgets and failure policy (design decisions D21, D23)
+------------------------------------------------------
+- Before every request, `requests_today(source)` is checked against that source's daily
+  budget (counted from `collector_runs`, so it holds across restarts and re-runs).
+- Errors are the shared ones from `sources/base.py`; each source translates its own:
+      SourceAuthError   bad/missing key       -> stop THIS source (others have their own keys)
+      SourceQuotaError  out of quota/credits  -> stop this source for today
+      SourceError       anything else         -> skip this search, continue
+  A single unusable job (`ValueError` in normalize) is skipped and counted, never fatal.
+- Every attempt, success or failure, gets one `collector_runs` row: failures are never silent.
+
+Idempotency (design decision D19)
+---------------------------------
+Safe to run twice: `upsert_many` skips postings already stored (same source + source_job_id),
+and the postings of a page are committed together with their run-log row.
+
+Usage (from backend/)
+---------------------
+    uv run python -m app.collector.run_daily               # normal run
+    uv run python -m app.collector.run_daily --dry-run     # fetch + normalize, save nothing
+    uv run python -m app.collector.run_daily --limit 1     # only the first planned search
+    uv run python -m app.collector.run_daily --sources ats job_boards   # only these sources
+
+Exit code is 1 only if errors happened and nothing at all was fetched (or no source could be
+configured); partial failures are recorded in `collector_runs` and exit 0.
+
+Related modules
+---------------
+- `app.collector.sources.base`           PlanItem, FetchResult, Source, shared errors
+- `app.collector.sources.jsearch`        JSearch client + source
+- `app.collector.sources.tavily_search`  Tavily ATS + job-board sources
+- `app.collector.normalize`, `dedupe`    PostingIn, fingerprint
+- `app.db.repositories`                  upsert_many, log_run, requests_today
 """
 
 from __future__ import annotations
@@ -16,19 +72,23 @@ import asyncio
 import logging
 import sys
 from collections.abc import Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
+from tavily import AsyncTavilyClient
+
 from app.collector.dedupe import fingerprint
-from app.collector.sources.base import PlanItem, Source
-from app.collector.sources.jsearch import (
-    JSearchAuthError,
-    JSearchClient,
-    JSearchError,
-    JSearchQuotaError,
-    JSearchSource,
+from app.collector.sources.base import (
+    PlanItem,
+    Source,
+    SourceAuthError,
+    SourceError,
+    SourceQuotaError,
 )
+from app.collector.sources.jsearch import JSearchClient, JSearchSource
+from app.collector.sources.tavily_search import ats_source, boards_source
 from app.config import get_settings
 from app.db.repositories.collector_runs import log_run, requests_today
 from app.db.repositories.postings import upsert_many
@@ -36,9 +96,6 @@ from app.db.session import AsyncSessionLocal, engine
 
 logger = logging.getLogger("collector")
 
-# ---- the plan ----------------------------------------------------------------------
-# Every search you care about. todays_plan() rotates through them so each one runs
-# regularly while staying inside the daily request budget.
 SEARCHES: list[PlanItem] = [
     PlanItem("machine learning engineer", "Lagos", "ng"),
     PlanItem("AI engineer", "Nigeria", "ng"),
@@ -63,12 +120,10 @@ def todays_plan(today: date, searches: list[PlanItem], per_day: int) -> list[Pla
     start = (today.toordinal() * per_day) % len(searches)
     return [searches[(start + i) % len(searches)] for i in range(per_day)]
 
-
-# ---- tallies -----------------------------------------------------------------------
-
-
 @dataclass
 class Totals:
+    """What one whole run did, across all sources."""
+
     fetched: int = 0
     inserted: int = 0
     duplicates: int = 0
@@ -81,10 +136,6 @@ class Totals:
             f"fetched={self.fetched} inserted={self.inserted} duplicates={self.duplicates} "
             f"skipped_bad={self.skipped_bad} cost=${self.cost_usd:.4f} errors={len(self.errors)}"
         )
-
-
-# ---- one plan item -----------------------------------------------------------------
-
 
 async def process_item(
     source: Source,
@@ -162,10 +213,6 @@ async def log_failure(
         )
         await db.commit()
 
-
-# ---- the whole run -----------------------------------------------------------------
-
-
 async def run(
     sources: list[Source],
     plan: list[PlanItem],
@@ -185,52 +232,97 @@ async def run(
                 async with session_factory() as db:
                     used = await requests_today(db, source.name)
                 if used >= limit:
-                    logger.warning("%s: daily request budget reached (%d/%d), stopping", source.name, used, limit)
+                    logger.warning("%s: daily request budget reached (%d/%d), stopping",
+                                   source.name, used, limit)
                     break
 
             started_at = datetime.now(UTC)
             try:
                 await process_item(source, item, totals, session_factory, dry_run)
-            except JSearchAuthError as e:  # bad key: nothing will work -> stop everything
-                totals.errors.append(str(e))
-                logger.error("%s: %s - stopping the whole run", source.name, e)
+            except SourceAuthError as e:  # this source's key is bad: none of its requests will work
+                totals.errors.append(f"{source.name}: {e}")
+                logger.error("%s: %s - stopping this source (check its API key)", source.name, e)
                 if not dry_run:
                     await log_failure(session_factory, source, item, started_at, e)
-                return totals
-            except JSearchQuotaError as e:  # quota low/gone: this source is done for today
-                totals.errors.append(str(e))
+                break
+            except SourceQuotaError as e:  # quota/credits gone: this source is done for today
+                totals.errors.append(f"{source.name}: {e}")
                 logger.error("%s: %s - stopping this source for today", source.name, e)
                 if not dry_run:
                     await log_failure(session_factory, source, item, started_at, e)
                 break
-            except JSearchError as e:  # unavailable / bad response: skip just this search
-                totals.errors.append(str(e))
+            except SourceError as e:  # unavailable / bad response: skip just this search
+                totals.errors.append(f"{source.name}: {e}")
                 logger.error("%s: %s - skipping this search", source.name, e)
                 if not dry_run:
                     await log_failure(session_factory, source, item, started_at, e)
                 continue
     return totals
 
+async def build_sources(stack: AsyncExitStack, wanted: set[str] | None = None) -> list[Source]:
+    """Create every source whose API key is configured. Clients are closed by `stack`.
 
-# ---- command line ------------------------------------------------------------------
+    `wanted` limits which sources are built (from --sources); None means all.
+    """
+    settings = get_settings()
+    sources: list[Source] = []
+
+    def want(name: str) -> bool:
+        return wanted is None or name in wanted
+
+    if want("jsearch"):
+        if settings.jsearch_api_key:
+            js = await stack.enter_async_context(JSearchClient(settings.jsearch_api_key))
+            sources.append(JSearchSource(js))
+        else:
+            logger.warning("JSEARCH_API_KEY not set: skipping the jsearch source")
+
+    if want("ats") or want("job_boards"):
+        if settings.tavily_api_key:
+            tavily = AsyncTavilyClient(api_key=settings.tavily_api_key)
+            stack.push_async_callback(tavily.close)
+            if want("ats"):
+                sources.append(ats_source(tavily))
+            if want("job_boards"):
+                sources.append(boards_source(tavily))
+        else:
+            logger.warning("TAVILY_API_KEY not set: skipping the ats and job_boards sources")
+
+    return sources
+
+
+def budgets() -> dict[str, int]:
+    """Daily request budget per source name."""
+    settings = get_settings()
+    return {
+        "jsearch": settings.jsearch_max_requests_per_day,
+        "ats": settings.tavily_max_requests_per_day,
+        "job_boards": settings.tavily_max_requests_per_day,
+    }
+
+SOURCE_NAMES = ("jsearch", "ats", "job_boards")
 
 
 async def _main(args: argparse.Namespace) -> Totals:
-    settings = get_settings()
-    plan = todays_plan(datetime.now(UTC).date(), SEARCHES, settings.jsearch_max_requests_per_day)
+    limits = budgets()
+    wanted = set(args.sources) if args.sources else None
+
+    # One plan for all sources, as long as the largest budget; each source stops at its own.
+    per_day = max(limits[name] for name in (wanted or SOURCE_NAMES))
+    plan = todays_plan(datetime.now(UTC).date(), SEARCHES, per_day)
     if args.limit is not None:
         plan = plan[: args.limit]
     logger.info("plan for today: %s", [f"{i.role} in {i.place} ({i.country})" for i in plan])
 
     try:
-        async with JSearchClient(settings.jsearch_api_key) as js:
-            sources: list[Source] = [JSearchSource(js)]  # later: LinkedIn (treg), Greenhouse, ...
-            return await run(
-                sources,
-                plan,
-                max_requests_per_day={"jsearch": settings.jsearch_max_requests_per_day},
-                dry_run=args.dry_run,
-            )
+        async with AsyncExitStack() as stack:  # closes every API client at the end
+            sources = await build_sources(stack, wanted)
+            if not sources:
+                totals = Totals()
+                totals.errors.append("no source is configured (check the API keys in .env)")
+                return totals
+            logger.info("sources: %s", [s.name for s in sources])
+            return await run(sources, plan, max_requests_per_day=limits, dry_run=args.dry_run)
     finally:
         await engine.dispose()  # clean shutdown (avoids "Event loop is closed" on Windows)
 
@@ -239,19 +331,26 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Collect job postings from all sources.")
     parser.add_argument("--dry-run", action="store_true", help="fetch + normalize only; save nothing")
     parser.add_argument("--limit", type=int, default=None, help="run only the first N planned searches")
+    parser.add_argument("--sources", nargs="+", choices=SOURCE_NAMES, default=None,
+                        help="run only these sources (default: every configured source)")
     args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    for noisy in ("httpx", "httpx2"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
     try:
         totals = asyncio.run(_main(args))
-    except JSearchAuthError as e:  # e.g. missing key, raised before any request
+    except SourceAuthError as e:  # e.g. a client that validates its key at startup
         logger.error("cannot start: %s", e)
         return 1
 
     print(totals.summary())
+    for error in totals.errors:
+        print(f"  error: {error}")
     # Exit 1 only if nothing worked at all; partial failures are recorded in collector_runs.
     return 1 if totals.errors and totals.fetched == 0 else 0
 
