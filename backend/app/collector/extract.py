@@ -171,12 +171,20 @@ def is_grounded(evidence: str, description: str | None) -> bool:
     return bool(quote) and quote in _squash(description or "")
 
 def _money(value: float | None) -> Decimal | None:
+    """A float from the model -> an exact 2-decimal amount, or None if it isn't a real number.
+
+    NaN and infinity are rejected explicitly: Decimal accepts them without an error, and
+    quantize() keeps them as NaN, which the Numeric(12, 2) column would refuse.
+    """
     if value is None:
         return None
     try:
-        return Decimal(str(value)).quantize(Decimal("0.01"))
+        amount = Decimal(str(value))
     except InvalidOperation:
         return None
+    if not amount.is_finite():
+        return None
+    return amount.quantize(Decimal("0.01"))
 
 async def save_facts(db: AsyncSession, posting: Posting, result: ExtractionResult) -> None:
     """Write one ExtractionResult onto the posting. Flushes; the caller commits.
