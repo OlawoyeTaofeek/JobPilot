@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     hunter_api_key: str = ""
     google_client_id: str = ""
     google_client_secret: str = ""
+    tavily_api_key: str = ""
 
     mcp_server_url: str = ""
     mcp_api_key: str = ""
@@ -37,12 +38,21 @@ class Settings(BaseSettings):
     daily_user_budget_usd: float = 1.0
     chat_rate_limit_per_min: int = 20
 
+    # extraction batch
+    extraction_max_concurrency: int = 5
+    extraction_max_postings_per_run: int = 200
+    extraction_price_input_per_m: float = 0.25    # USD per 1M input tokens
+    extraction_price_output_per_m: float = 2.00   # USD per 1M output tokens
+
     # Seed user (scripts/seed.py)
     seed_email: str | None = None
     seed_username: str | None = None
     seed_password: str | None = None
     seed_full_name: str | None = None
     jsearch_max_requests_per_day: int = 6
+
+    tavily_api_key: str = ""
+    tavily_max_requests_per_day: int = 6
 
 
 @lru_cache

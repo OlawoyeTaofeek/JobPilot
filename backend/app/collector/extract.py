@@ -161,21 +161,14 @@ async def extract_one(agent: Agent, posting: Posting) -> ExtractionResult:
         log.warning("extraction failed for posting %s: %s", posting.id, result.error)
     return result
 
-
-# ---------------------------------------------------------------------------
-# saving
-# ---------------------------------------------------------------------------
-
 def _squash(text: str) -> str:
     """Lowercase + single spaces, so line breaks or double spaces don't break matching."""
     return re.sub(r"\s+", " ", text).strip().lower()
-
 
 def is_grounded(evidence: str, description: str | None) -> bool:
     """Does the model's evidence quote really appear in the posting?"""
     quote = _squash(evidence).strip("\"'“”‘’ .…")
     return bool(quote) and quote in _squash(description or "")
-
 
 def _money(value: float | None) -> Decimal | None:
     if value is None:
@@ -185,18 +178,15 @@ def _money(value: float | None) -> Decimal | None:
     except InvalidOperation:
         return None
 
-
 async def save_facts(db: AsyncSession, posting: Posting, result: ExtractionResult) -> None:
     """Write one ExtractionResult onto the posting. Flushes; the caller commits.
 
     `posting` must be attached to `db` (load it with db.get(Posting, id) in THIS session).
     """
-    # always: record that we tried, with what
     posting.extracted_at = datetime.now(timezone.utc)
     posting.extraction_version = EXTRACTION_VERSION
     posting.extraction_model = EXTRACTION_MODEL
 
-    # failure: keep any previous good facts, just record the error
     if result.error or result.facts is None:
         posting.extraction_error = result.error or "no facts returned"
         await db.flush()
@@ -210,14 +200,12 @@ async def save_facts(db: AsyncSession, posting: Posting, result: ExtractionResul
     posting.seniority = f.seniority
     posting.years_experience_min = f.years_experience_min
     posting.work_mode = f.work_mode
-    # remote_scope only means something for fully remote jobs; enforce it even if the model slips
     posting.remote_scope = f.remote_scope if f.work_mode == "remote" else "not_applicable"
     posting.visa_sponsorship = f.visa_sponsorship
     posting.relocation_support = f.relocation_support
     posting.clearance_required = f.clearance_required
     posting.quality_flag = f.quality_flag
 
-    # trust: clamp, then grounding check
     confidence = min(max(f.confidence, 0.0), 1.0)
     if not is_grounded(f.evidence, posting.description):
         log.info("posting %s: evidence not found in text, confidence capped", posting.id)
@@ -225,7 +213,6 @@ async def save_facts(db: AsyncSession, posting: Posting, result: ExtractionResul
     posting.extraction_confidence = confidence
     posting.extraction_evidence = f.evidence
 
-    # languages
     posting.required_languages = [
         req.language[:40] for req in f.language_requirements if req.level == "required"
     ]
@@ -233,15 +220,13 @@ async def save_facts(db: AsyncSession, posting: Posting, result: ExtractionResul
         req.language[:40] for req in f.language_requirements if req.level == "preferred"
     ]
 
-    # salary: only fill the gap, never overwrite what the source gave us
     if posting.salary_min is None and posting.salary_max is None and f.salary is not None:
         low, high = _money(f.salary.min), _money(f.salary.max)
-        if low is None or high is None or low <= high:  # respect the salary_range CHECK
+        if low is None or high is None or low <= high: 
             posting.salary_min, posting.salary_max = low, high
             posting.salary_currency = (f.salary.currency or "").upper()[:3] or None
             posting.salary_period = f.salary.period
 
-    # skills: replace, don't append
     await db.execute(delete(PostingSkill).where(PostingSkill.posting_id == posting.id))
     skills: dict[str, str] = {}
     for raw in f.skills[:25]:
@@ -256,17 +241,12 @@ async def save_facts(db: AsyncSession, posting: Posting, result: ExtractionResul
     await db.flush()
 
 
-# ---------------------------------------------------------------------------
-# manual check: extract a few postings and print them next to the title
-# ---------------------------------------------------------------------------
-
 async def _main(limit: int, dry_run: bool) -> None:
     set_default_openai_key(get_settings().openai_api_key)
     setup_tracing()  # Langfuse, if keys are set
     agent = build_extractor()
     total_in = total_out = failed = 0
     try:
-        # 1. load a few unextracted postings (short session; objects stay readable after it)
         async with AsyncSessionLocal() as db:
             postings = (await db.scalars(
                 select(Posting)
@@ -279,11 +259,9 @@ async def _main(limit: int, dry_run: bool) -> None:
             print("Nothing to extract: every posting already has extracted_at set.")
             return
 
-        # one trace for the whole batch; each posting's run is nested inside it
         with trace("posting_extraction",
                    metadata={"version": EXTRACTION_VERSION, "dry_run": str(dry_run)}):
             for posting in postings:
-                # 2. extract + print side by side with the title
                 result = await extract_one(agent, posting)
                 total_in += result.input_tokens
                 total_out += result.output_tokens
@@ -299,14 +277,12 @@ async def _main(limit: int, dry_run: bool) -> None:
                     print(f"evidence grounded: {grounded}")
                 print(f"tokens: in={result.input_tokens} out={result.output_tokens}")
 
-                # 3. save (one short session per posting)
                 if not dry_run:
                     async with AsyncSessionLocal() as db:
                         attached = await db.get(Posting, result.posting_id)
                         await save_facts(db, attached, result)
                         await db.commit()
 
-        # 4. totals -> cost estimate
         done = len(postings)
         print("=" * 80)
         print(f"{done} postings, {failed} failed, {'NOT saved (dry run)' if dry_run else 'saved'}")
