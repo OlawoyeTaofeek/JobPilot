@@ -7,6 +7,10 @@ runs each one through every configured source, and stores new postings:
 
     run_daily (collect)  ->  extract_pending (understand)  ->  digest / agent / analytics
 
+By default, after collecting, the same run also extracts facts from every new posting
+(`extract_pending.run_batch`), so ONE scheduled command does both stages. Skip that with
+`--no-extract`; a `--dry-run` never extracts (nothing new was saved).
+
 For every source and every planned search:
 
     fetch -> normalize -> fingerprint -> upsert_many -> log_run (collector_runs)
@@ -52,15 +56,22 @@ Usage (from backend/)
     uv run python -m app.collector.run_daily --dry-run     # fetch + normalize, save nothing
     uv run python -m app.collector.run_daily --limit 1     # only the first planned search
     uv run python -m app.collector.run_daily --sources ats job_boards   # only these sources
+    uv run python -m app.collector.run_daily --no-extract  # collect only, skip the LLM stage
 
-Exit code is 1 only if errors happened and nothing at all was fetched (or no source could be
-configured); partial failures are recorded in `collector_runs` and exit 0.
+Exit code is 1 when collection fetched nothing and had errors (or no source could be
+configured), or when extraction could not run at all (bad OpenAI key, no credit) or every
+posting it tried failed. Partial failures are recorded (`collector_runs`, `extraction_error`)
+and exit 0.
+
+Extraction errors never undo collection: postings are already committed, and the next run's
+extraction picks up anything left pending.
 
 Related modules
 ---------------
 - `app.collector.sources.base`           PlanItem, FetchResult, Source, shared errors
 - `app.collector.sources.jsearch`        JSearch client + source
 - `app.collector.sources.tavily_search`  Tavily ATS + job-board sources
+- `app.collector.extract_pending`        stage 2: LLM extraction of pending postings
 - `app.collector.normalize`, `dedupe`    PostingIn, fingerprint
 - `app.db.repositories`                  upsert_many, log_run, requests_today
 """
@@ -77,9 +88,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
+from openai import AuthenticationError, PermissionDeniedError, RateLimitError
 from tavily import AsyncTavilyClient
 
 from app.collector.dedupe import fingerprint
+from app.collector.extract_pending import BatchTotals, configure_openai, run_batch
 from app.collector.sources.base import (
     PlanItem,
     Source,
@@ -93,9 +106,13 @@ from app.config import get_settings
 from app.db.repositories.collector_runs import log_run, requests_today
 from app.db.repositories.postings import upsert_many
 from app.db.session import AsyncSessionLocal, engine
+from app.observability import flush_tracing, setup_tracing
 
 logger = logging.getLogger("collector")
 
+# ---- the plan ----------------------------------------------------------------------
+# Every search you care about. todays_plan() rotates through them so each one runs
+# regularly while staying inside the daily request budgets.
 SEARCHES: list[PlanItem] = [
     PlanItem("machine learning engineer", "Lagos", "ng"),
     PlanItem("AI engineer", "Nigeria", "ng"),
@@ -120,6 +137,10 @@ def todays_plan(today: date, searches: list[PlanItem], per_day: int) -> list[Pla
     start = (today.toordinal() * per_day) % len(searches)
     return [searches[(start + i) % len(searches)] for i in range(per_day)]
 
+
+# ---- tallies -----------------------------------------------------------------------
+
+
 @dataclass
 class Totals:
     """What one whole run did, across all sources."""
@@ -136,6 +157,10 @@ class Totals:
             f"fetched={self.fetched} inserted={self.inserted} duplicates={self.duplicates} "
             f"skipped_bad={self.skipped_bad} cost=${self.cost_usd:.4f} errors={len(self.errors)}"
         )
+
+
+# ---- one plan item -----------------------------------------------------------------
+
 
 async def process_item(
     source: Source,
@@ -213,6 +238,10 @@ async def log_failure(
         )
         await db.commit()
 
+
+# ---- the whole run -----------------------------------------------------------------
+
+
 async def run(
     sources: list[Source],
     plan: list[PlanItem],
@@ -259,6 +288,10 @@ async def run(
                 continue
     return totals
 
+
+# ---- building the sources ------------------------------------------------------------
+
+
 async def build_sources(stack: AsyncExitStack, wanted: set[str] | None = None) -> list[Source]:
     """Create every source whose API key is configured. Clients are closed by `stack`.
 
@@ -279,6 +312,8 @@ async def build_sources(stack: AsyncExitStack, wanted: set[str] | None = None) -
 
     if want("ats") or want("job_boards"):
         if settings.tavily_api_key:
+            # Never create the Tavily client without a key: the SDK would silently switch
+            # to its limited "keyless" mode instead of failing.
             tavily = AsyncTavilyClient(api_key=settings.tavily_api_key)
             stack.push_async_callback(tavily.close)
             if want("ats"):
@@ -300,10 +335,23 @@ def budgets() -> dict[str, int]:
         "job_boards": settings.tavily_max_requests_per_day,
     }
 
+
+# ---- command line ------------------------------------------------------------------
+
 SOURCE_NAMES = ("jsearch", "ats", "job_boards")
 
 
-async def _main(args: argparse.Namespace) -> Totals:
+@dataclass
+class RunResult:
+    """Both stages of one run."""
+
+    collected: Totals
+    extracted: BatchTotals | None = None   # None when extraction was skipped
+    extraction_error: str | None = None     # set when extraction could not run at all
+
+
+async def collect(args: argparse.Namespace) -> Totals:
+    """Stage 1: build the sources and run today's plan."""
     limits = budgets()
     wanted = set(args.sources) if args.sources else None
 
@@ -314,16 +362,42 @@ async def _main(args: argparse.Namespace) -> Totals:
         plan = plan[: args.limit]
     logger.info("plan for today: %s", [f"{i.role} in {i.place} ({i.country})" for i in plan])
 
+    async with AsyncExitStack() as stack:  # closes every API client at the end
+        sources = await build_sources(stack, wanted)
+        if not sources:
+            totals = Totals()
+            totals.errors.append("no source is configured (check the API keys in .env)")
+            return totals
+        logger.info("sources: %s", [s.name for s in sources])
+        return await run(sources, plan, max_requests_per_day=limits, dry_run=args.dry_run)
+
+
+async def extract(result: RunResult) -> None:
+    """Stage 2: extract facts for everything pending. Never undoes stage 1."""
+    if not get_settings().openai_api_key:
+        result.extraction_error = "OPENAI_API_KEY not set: extraction skipped"
+        logger.warning(result.extraction_error)
+        return
+    configure_openai()
+    setup_tracing()
     try:
-        async with AsyncExitStack() as stack:  # closes every API client at the end
-            sources = await build_sources(stack, wanted)
-            if not sources:
-                totals = Totals()
-                totals.errors.append("no source is configured (check the API keys in .env)")
-                return totals
-            logger.info("sources: %s", [s.name for s in sources])
-            return await run(sources, plan, max_requests_per_day=limits, dry_run=args.dry_run)
+        result.extracted = await run_batch()
+    except (AuthenticationError, PermissionDeniedError, RateLimitError) as e:
+        # bad key / no credit: postings are safe in the DB; the next run will extract them
+        result.extraction_error = f"{type(e).__name__}: {e}"[:300]
+        logger.error("extraction stopped: %s", result.extraction_error)
+
+
+async def _main(args: argparse.Namespace) -> RunResult:
+    try:
+        result = RunResult(collected=await collect(args))
+        if args.dry_run or args.no_extract:
+            logger.info("extraction skipped (%s)", "dry run" if args.dry_run else "--no-extract")
+        else:
+            await extract(result)
+        return result
     finally:
+        flush_tracing()
         await engine.dispose()  # clean shutdown (avoids "Event loop is closed" on Windows)
 
 
@@ -333,6 +407,8 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None, help="run only the first N planned searches")
     parser.add_argument("--sources", nargs="+", choices=SOURCE_NAMES, default=None,
                         help="run only these sources (default: every configured source)")
+    parser.add_argument("--no-extract", action="store_true",
+                        help="collect only; don't run the LLM extraction stage afterwards")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -343,16 +419,27 @@ def main() -> int:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     try:
-        totals = asyncio.run(_main(args))
+        result = asyncio.run(_main(args))
     except SourceAuthError as e:  # e.g. a client that validates its key at startup
         logger.error("cannot start: %s", e)
         return 1
 
-    print(totals.summary())
-    for error in totals.errors:
+    collected = result.collected
+    print(f"collect: {collected.summary()}")
+    for error in collected.errors:
         print(f"  error: {error}")
-    # Exit 1 only if nothing worked at all; partial failures are recorded in collector_runs.
-    return 1 if totals.errors and totals.fetched == 0 else 0
+    if result.extracted is not None:
+        print(f"extract: {result.extracted.summary()}")
+    elif result.extraction_error:
+        print(f"extract: FAILED - {result.extraction_error}")
+
+    collect_broken = bool(collected.errors) and collected.fetched == 0
+    extract_broken = result.extraction_error is not None and not args.dry_run and not args.no_extract
+    if result.extracted is not None:
+        x = result.extracted
+        extract_broken = extract_broken or (x.selected > 0 and x.failed == x.selected)
+    # Exit 1 = something a scheduler should flag; partial failures are recorded and exit 0.
+    return 1 if collect_broken or extract_broken else 0
 
 
 if __name__ == "__main__":
